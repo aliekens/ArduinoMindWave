@@ -19,28 +19,40 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(16, 3, NEO_GRB + NEO_KHZ800);
 #include <SoftwareSerial.h>     // library for software serial
 SoftwareSerial bluetoothSerial(5, 6);  // RX, TX pins from the bluetooth module (here, we used a bluesmirf)
 
-void setup(){
+void setup() {
   Serial.begin( 57600 ); // USB serial monitor to Arduino
   bluetoothSerial.begin( 57600 ); // bluetooth serial to NeuroSky MindWave
   THINKGEAR_initParser(&parser, handleDataValueFunc, NULL); // assign the handlers for the parser
   Serial.flush();
-  
-  #ifdef NEOPIXELRING
-    strip.begin();
-    for(uint16_t i=0; i<strip.numPixels(); i++) {
-      strip.setPixelColor(i, strip.Color( 255, 0, 0 ) );
-    }
-    strip.show(); // Initialize all pixels to 'off'
-  #endif
-} 
 
-void loop(){
-  while(!bluetoothSerial.available()) {
-//    updateLED(); // wait for a byte from the bluetooth connection
-    
+#ifdef NEOPIXELRING
+  strip.begin();
+  for (uint16_t i = 0; i < strip.numPixels(); i++) {
+    strip.setPixelColor(i, strip.Color( 0, 100, 0 ) );
   }
-  THINKGEAR_parseByte(&parser, Serial1.read()); // forward the byte to the stream parser
-} 
+  strip.show(); // Initialize all pixels to 'off'
+#endif
+}
+
+int timeOfLastSignal = millis();
+int redSet = false;
+int loopCounter = 0;
+
+void loop() {
+  while (!bluetoothSerial.available()) {
+    loopCounter++;
+    if( loopCounter % 1000 == 0 ) {
+      int currentTime = millis();
+      if( !redSet && ( currentTime > timeOfLastSignal + 10000 ) ) {
+        for( int i = 0; i < strip.numPixels(); i++ )
+          strip.setPixelColor(i, strip.Color( 255, 0, 0 ) );
+        redSet = true;
+        strip.show(); // Initialize all pixels to 'off'
+      }
+    }
+  }
+  THINKGEAR_parseByte(&parser, bluetoothSerial.read()); // forward the byte to the stream parser
+}
 
 int attention = 0;
 int attentioncurrent = 0;
@@ -48,21 +60,49 @@ int meditation = 0;
 int meditationcurrent = 0;
 
 void updateRing1() {
-  for( int j = 0; j < 20; j++ ) {
+  for ( int j = 0; j < 20; j++ ) {
     attentioncurrent = 0.9 * attentioncurrent + 0.1 * ( attention * 16 );
-    for(uint16_t i=0; i<strip.numPixels(); i++) {
+    for (uint16_t i = 0; i < strip.numPixels(); i++) {
       int red = 0;
       int green = 0;
       int blue = 0;
-      if( attentioncurrent / 100 > i )
+      if ( attentioncurrent / 100 > i )
         blue = 100;
-      if( attentioncurrent / 100 == i )
+      if ( attentioncurrent / 100 == i )
         blue = attentioncurrent % 100;
-      if( attentioncurrent / 200 == 7 ) {
+      if ( attentioncurrent / 200 == 7 ) {
         green = ( attentioncurrent % 200 ) / 2;
         red = ( attentioncurrent % 200 ) / 2;
       }
       strip.setPixelColor(i, strip.Color( red, green, blue ) );
+    }
+    strip.show();
+    delay( 20 );
+  }
+}
+
+uint32_t Wheel(byte WheelPos, float brightness) {
+  if(WheelPos < 85) {
+   return strip.Color(brightness * WheelPos * 3, brightness * ( 255 - WheelPos * 3 ), 0);
+  } else if(WheelPos < 170) {
+   WheelPos -= 85;
+   return strip.Color(brightness * ( 255 - WheelPos * 3 ), 0, brightness * WheelPos * 3);
+  } else {
+   WheelPos -= 170;
+   return strip.Color(0, brightness * WheelPos * 3, brightness * ( 255 - WheelPos * 3 ) );
+  }
+}
+
+void updateRing3() {
+  for ( int j = 0; j < 20; j++ ) {
+    attentioncurrent = 0.9 * attentioncurrent + 0.1 * ( attention * 16 );
+    for (uint16_t i = 0; i < strip.numPixels(); i++) {
+      float brightness = 0.0;
+      if ( attentioncurrent / 100 > i )
+        brightness = 1.0;
+      if ( attentioncurrent / 100 == i )
+        brightness = ( attentioncurrent % 100 ) / 100.0;
+      strip.setPixelColor(i, Wheel( i * 16, brightness ) );
     }
     strip.show();
     delay( 20 );
@@ -85,21 +125,21 @@ int counter = 0;
 void updateRing2() {
   counter += 1;
   attentioncurrent = 0.9 * attentioncurrent + 0.1 * attention;
-  for(int i=0; i<strip.numPixels(); i++) {
+  for (int i = 0; i < strip.numPixels(); i++) {
     int brightness = attentioncurrent * 2.55;
     brightness = applyGammaCorrection( brightness );
-    strip.setPixelColor(i, strip.Color( 
-      brightness * ( 0.5 + sin( i + counter / 3.0 ) / 2 ), 
-      brightness * ( 0.5 + cos( i + counter / 4.0 ) / 2 ), 
-      brightness * ( 0.5 + sin ( i- counter / 5.0 ) / 2 ) 
-    ) );
+    strip.setPixelColor(i, strip.Color(
+                          brightness * ( 0.5 + sin( i + counter / 3.0 ) / 2 ),
+                          brightness * ( 0.5 + cos( i + counter / 4.0 ) / 2 ),
+                          brightness * ( 0.5 + sin ( i - counter / 5.0 ) / 2 )
+                        ) );
   }
   strip.show();
 }
 
 void updateAttention( int value ) {
   attention = value;
-  updateRing1();
+  updateRing3();
 }
 
 void updateMeditation( int value ) {
@@ -107,42 +147,50 @@ void updateMeditation( int value ) {
 }
 
 void handleDataValueFunc(unsigned char extendedCodeLevel, unsigned char code, unsigned char valueLength, const unsigned char *value) {
- 
-    if( extendedCodeLevel == 0 ) {
- 
-        switch( code ) {
- 
-            /* [CODE]: ATTENTION eSense */
-            case( 0x04 ):
-                if( ( value[ 0 ] > 2 ) && ( value[ 0 ] < 100 ) ) {
-                  Serial.print( "Attention Level: " );
-                  Serial.println( value[0] & 0xFF );
-                  updateAttention( value[ 0 ] );
-                }
-                break;
- 
-            /* [CODE]: MEDITATION eSense */
-            case( 0x05 ):
-                Serial.print( "Meditation Level: " );
-                Serial.println( value[0] & 0xFF );
-                updateMeditation( value[ 0 ] );
-                break;
- 
-            /* Other [CODE]s */
-            /*default:
-                Serial.print( "EXCODE level: ");
-                Serial.print( extendedCodeLevel );
-                Serial.print( " code: " );
-                Serial.print( code );
-                Serial.print( " vLength: " );
-                Serial.print( valueLength );
-                Serial.print( " value(s):" );
-                for( int i=0; i<valueLength; i++ ) {
-                  Serial.print( value[i] & 0xFF );
-                  Serial.print( " " );
-                }
-                Serial.println();*/
+
+  if ( extendedCodeLevel == 0 ) {
+
+    switch ( code ) {
+
+      /* [CODE]: ATTENTION eSense */
+      case ( 0x04 ):
+        Serial.println( value[0] & 0xFF );
+        if ( ( value[ 0 ] > 5 ) && ( value[ 0 ] < 100 ) ) {
+          //Serial.print( "Attention Level: " );
+          timeOfLastSignal = millis();
+          redSet = false;
+          updateAttention( value[ 0 ] );
         }
-        
+        if( value[ 0 ] == 0 ) {
+          timeOfLastSignal = millis();
+          for( int i = 0; i < strip.numPixels(); i++ )
+            strip.setPixelColor(i, strip.Color( 0, 0, 255 ) );
+          strip.show();
+        }
+        break;
+
+      /* [CODE]: MEDITATION eSense */
+      case ( 0x05 ):
+        //Serial.print( "Meditation Level: " );
+        //Serial.println( value[0] & 0xFF );
+        updateMeditation( value[ 0 ] );
+        break;
+
+        /* Other [CODE]s */
+        /*default:
+            Serial.print( "EXCODE level: ");
+            Serial.print( extendedCodeLevel );
+            Serial.print( " code: " );
+            Serial.print( code );
+            Serial.print( " vLength: " );
+            Serial.print( valueLength );
+            Serial.print( " value(s):" );
+            for( int i=0; i<valueLength; i++ ) {
+              Serial.print( value[i] & 0xFF );
+              Serial.print( " " );
+            }
+            Serial.println();*/
     }
+
+  }
 }
